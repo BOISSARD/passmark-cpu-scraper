@@ -1,10 +1,12 @@
 const puppeteer = require('puppeteer');
+const fs = require('fs');
 
 async function scrape() {
     const browser = await puppeteer.launch({ headless: false });
     const page = await browser.newPage();
     await page.goto('http://www.cpubenchmark.net/CPU_mega_page.html');
     
+	await page.waitForSelector('div#qc-cmp2-ui');
 	const privacy_modal = await page.$('div#qc-cmp2-ui');
 	if (privacy_modal) {
         console.log("Privacy modal found")
@@ -13,12 +15,12 @@ async function scrape() {
             await button.click();
         }
     }
-	console.log("Pas/plus de privacy modal")
+	console.log("No privacy modal")
 
 	// Cliquer sur le bouton pour ouvrir le menu
 	await page.waitForSelector('.columnSelectorButton[for="colSelect"]');
 	await page.click('.columnSelectorButton[for="colSelect"]');
-	console.log("Cliqué sur le bouton .columnSelectorButton")
+	console.log("Clicked on .columnSelectorButton")
 	
 	// Attendre que le menu apparaisse
 	const menuColumnSelector = await page.$("#columnSelector")
@@ -34,64 +36,53 @@ async function scrape() {
 			menuColumnSelector // Arguments pour la fonction
 		);
 	}
-	console.log("Menu column selector ouvert")
+	console.log("Menu column selector opened")
 
-	/*
-	// await page.waitForSelector('#columnSelector')
-	await page.waitForFunction(() => {
-		const element = document.querySelector('#columnSelector');
-		console.log(element)
-		return window.getComputedStyle(element).display === 'block';
-	})
-	console.log("le Menu #columnSelector est affiché ?")
-	await page.$$eval('div.columnSelectorWrapper input[type="checkbox"]', checkboxes => {
-		console.log()
-		for (let checkbox of checkboxes) {
-			if (checkbox.getAttribute('data-column') === 'auto') {
-				checkbox.click()
-				// checkbox.checked = false;
-			} else {
-				// Vérifier si le checkbox n'est pas désactivé
-				if (!checkbox.disabled) {
-					// Si non, cocher le checkbox
-					checkbox.checked = true;
-				} else {
-					console.log(checkbox, "!! disabled !!")
-				}
-			}
-		}
-		return true;
-	});
+	const checkboxes = await menuColumnSelector.$$('input[type="checkbox"]')
+	for (const checkbox of checkboxes) {
+		const [name, checked] = await page.evaluate((checkbox) => [checkbox.getAttribute('data-column'), checkbox.checked], checkbox)
+        // console.log(name, checked)
+		if ((name === 'auto' && checked) || !checked) {
+            await checkbox.click();
+        }
+	}
+	await page.click('.columnSelectorButton[for="colSelect"]');
+	console.log("All column selected and menu closed")
 
 	await page.select('select[name="cputable_length"]', '-1');
 	console.log("Selected All CPU")
+	
+	let rowCount;
+    let previousRowCount;
+    do {
+        previousRowCount = rowCount;
+        await page.waitForTimeout(1000); // attend 1 seconde
+        const rows = await page.$$('#cputable tbody tr');
+        rowCount = rows.length;
+    } while (rowCount !== previousRowCount);
+    console.log(`The table has ${rowCount} rows.`);
 
-	// Attendez que le tableau ait plus d'une ligne et que la première ligne ne contienne pas "loading..."
-    await page.waitForFunction(() => {
-        const rows = document.querySelectorAll('#cputable tbody tr');
-        return rows.length > 1 && !rows[0].innerText.includes('oading...');
-    });
-
-    // Extrayez les données
-    const data = await page.evaluate(() => {
+	const data = await page.evaluate(() => {
         const rows = Array.from(document.querySelectorAll('#cputable tr'));
-        return rows.map(row => row.innerText);
+        return rows.map((row, i) => {
+            // return Array.from(row.cells).map(cell => cell.innerText)
+            return Array.from(row.cells).map(cell => cell.innerText.split('\n')[0]).join(",");
+        });
     });
-	// const data = await page.evaluate(() => {
-    //     const rows = Array.from(document.querySelectorAll('#cputable tr'));
-    //     return rows.map(row => {
-    //         return Array.from(row.cells).map(cell => cell.innerText.split('\n')[0]).join(",");
-    //     });
-    // });
-
-    console.log(data);
+    console.log(data.slice(0,2))
 
     // Joindre les lignes avec des retours à la ligne pour créer le CSV
     const csv = data.join("\n");
+	
+	fs.writeFile(`cpu_benchmarks_${new Date().toISOString().replace(/:/g, '-')}.csv`, csv, (err) => {
+		if (err) {
+			console.error('Une erreur s\'est produite lors de l\'écriture du fichier !', err);
+		} else {
+			console.log('Le fichier a été écrit avec succès !');
+		}
+	});
 
-	//*/
-
-    // await browser.close();
+    await browser.close();
 }
 
 scrape();
