@@ -1,57 +1,97 @@
-var express = require('express');
-var request = require('request');
-var cheerio = require('cheerio');
-var app = express();
-var { Parser } = require('json2csv');
-var { DateTime } = require('luxon');
+const puppeteer = require('puppeteer');
 
-app.get('/', async function (req, res) {
-	var url = 'http://www.cpubenchmark.net/CPU_mega_page.html';
-	var cpuData = [];
+async function scrape() {
+    const browser = await puppeteer.launch({ headless: false });
+    const page = await browser.newPage();
+    await page.goto('http://www.cpubenchmark.net/CPU_mega_page.html');
+    
+	const privacy_modal = await page.$('div#qc-cmp2-ui');
+	if (privacy_modal) {
+        console.log("Privacy modal found")
+        const button = await privacy_modal.$('button[mode="primary"]');
+        if (button) {
+            await button.click();
+        }
+    }
+	console.log("Pas/plus de privacy modal")
 
-	request(url, function (error, response, html) {
-		if (!error) {
+	// Cliquer sur le bouton pour ouvrir le menu
+	await page.waitForSelector('.columnSelectorButton[for="colSelect"]');
+	await page.click('.columnSelectorButton[for="colSelect"]');
+	console.log("Cliqué sur le bouton .columnSelectorButton")
+	
+	// Attendre que le menu apparaisse
+	const menuColumnSelector = await page.$("#columnSelector")
+	if (menuColumnSelector) {
+        console.log("menuColumnSelector found", menuColumnSelector)
+		// const displayProperty = await page.evaluate((element) => {
+		// 	return window.getComputedStyle(element).display;
+		// }, menuColumnSelector);
+		// console.log(displayProperty)
+		await page.waitForFunction(
+			(element) => window.getComputedStyle(element).display === 'block',
+			{}, // Options pour waitForFunction (facultatif)
+			menuColumnSelector // Arguments pour la fonction
+		);
+	}
+	console.log("Menu column selector ouvert")
 
-			var $ = cheerio.load(html);
-
-			$("tbody tr[id^=cpu]").each(function (x) {
-				var $ref = $(this),
-					$refExpandedContents = $ref.next().find("td div").contents();
-
-				cpuData.push({
-					name: $ref.find("td a:nth-child(2)").text() || '',
-					clockSpeed: parseInt($refExpandedContents[1].data.match(/\d+(?!.*\d)/)) || 0,
-					turboSpeed: parseInt($refExpandedContents[3].data.match(/\d+(?!.*\d)/)) || 0,
-					physicalCores: parseInt($refExpandedContents[5].data.match(/\d+\.?\d*/)) || 0,
-					logicalCores: parseInt($refExpandedContents[5].data.match(/\d+(?!.*\d)/)) || 0,
-					rank: parseInt($refExpandedContents[7].data.match(/\d+(?!.*\d)/)) || 0,
-					samples: parseInt($refExpandedContents[9].data.match(/\d+(?!.*\d)/)) || 0,
-					price: $ref.find("td:nth-child(2)").text() || '',
-					cpuMark: parseInt($ref.find("td:nth-child(3)").text()) || 0,
-					cpuValue: parseInt($ref.find("td:nth-child(4)").text()) || 0,
-					singleThreadMark: parseInt($ref.find("td:nth-child(5)").text()) || 0,
-					singleThreadValue: parseInt($ref.find("td:nth-child(6)").text()) || 0,
-					tdp: parseInt($ref.find("td:nth-child(6)").text()) || 0,
-					powerPerf: parseInt($ref.find("td:nth-child(7)").text()) || 0,
-					testDate: (new Date($ref.find("td:nth-child(9)").text())),
-					socket: $ref.find("td:nth-child(10)").text() || '',
-					category: $ref.find("td:nth-child(11)").text() || ''
-				});
-			});
-
-		} else {
-			console.log('Something went wrong');
+	/*
+	// await page.waitForSelector('#columnSelector')
+	await page.waitForFunction(() => {
+		const element = document.querySelector('#columnSelector');
+		console.log(element)
+		return window.getComputedStyle(element).display === 'block';
+	})
+	console.log("le Menu #columnSelector est affiché ?")
+	await page.$$eval('div.columnSelectorWrapper input[type="checkbox"]', checkboxes => {
+		console.log()
+		for (let checkbox of checkboxes) {
+			if (checkbox.getAttribute('data-column') === 'auto') {
+				checkbox.click()
+				// checkbox.checked = false;
+			} else {
+				// Vérifier si le checkbox n'est pas désactivé
+				if (!checkbox.disabled) {
+					// Si non, cocher le checkbox
+					checkbox.checked = true;
+				} else {
+					console.log(checkbox, "!! disabled !!")
+				}
+			}
 		}
-
-		const parser = new Parser();
-		const csv = parser.parse(cpuData);
-
-		res.setHeader('Content-disposition', `attachment; filename=cpubenchmark_${DateTime.local().toISO()}.csv`);
-		res.setHeader('Content-type', 'application/CSV');
-		res.write(csv);
-		res.end();
+		return true;
 	});
-});
 
-app.listen('8081');
-console.log('Live on localhost:8081');
+	await page.select('select[name="cputable_length"]', '-1');
+	console.log("Selected All CPU")
+
+	// Attendez que le tableau ait plus d'une ligne et que la première ligne ne contienne pas "loading..."
+    await page.waitForFunction(() => {
+        const rows = document.querySelectorAll('#cputable tbody tr');
+        return rows.length > 1 && !rows[0].innerText.includes('oading...');
+    });
+
+    // Extrayez les données
+    const data = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('#cputable tr'));
+        return rows.map(row => row.innerText);
+    });
+	// const data = await page.evaluate(() => {
+    //     const rows = Array.from(document.querySelectorAll('#cputable tr'));
+    //     return rows.map(row => {
+    //         return Array.from(row.cells).map(cell => cell.innerText.split('\n')[0]).join(",");
+    //     });
+    // });
+
+    console.log(data);
+
+    // Joindre les lignes avec des retours à la ligne pour créer le CSV
+    const csv = data.join("\n");
+
+	//*/
+
+    // await browser.close();
+}
+
+scrape();
